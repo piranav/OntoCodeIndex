@@ -1,0 +1,21 @@
+{
+  "name": "ontocode-ts-extractor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "ontocode-ts-extractor": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "eslint src --ext .ts,.tsx"
+  },
+  "dependencies": {
+    "ts-morph": "^21.0.0",
+    "globby": "^13.2.0",
+    "fast-glob": "^3.3.2"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3"
+  }
+}

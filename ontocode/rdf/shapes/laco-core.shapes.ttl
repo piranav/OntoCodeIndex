@@ -1,0 +1,31 @@
+@prefix sh:   <http://www.w3.org/ns/shacl#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+@prefix laco: <https://example.org/laco#> .
+
+# Every Unit must have one declaredIn and one span
+laco:UnitShape a sh:NodeShape ;
+  sh:targetClass laco:Unit ;
+  sh:property [ sh:path laco:declaredIn ; sh:minCount 1 ; sh:maxCount 1 ] ;
+  sh:property [ sh:path laco:span ;        sh:minCount 1 ; sh:maxCount 1 ] ;
+  sh:property [ sh:path laco:qualifiedName ; sh:minCount 1 ] .
+
+# Span shape
+laco:SpanShape a sh:NodeShape ;
+  sh:targetClass laco:Span ;
+  sh:property [ sh:path laco:startLine ; sh:datatype xsd:integer ; sh:minCount 1 ] ;
+  sh:property [ sh:path laco:endLine   ; sh:datatype xsd:integer ; sh:minCount 1 ] ;
+  sh:property [ sh:path laco:startCol  ; sh:datatype xsd:integer ; sh:minCount 1 ] ;
+  sh:property [ sh:path laco:endCol    ; sh:datatype xsd:integer ; sh:minCount 1 ] .
+
+# Parameter must have position
+laco:ParamShape a sh:NodeShape ;
+  sh:targetClass laco:Parameter ;
+  sh:property [ sh:path laco:position ; sh:datatype xsd:integer ; sh:minCount 1 ] .
+
+# Occurrence must carry subject, object, inFile, and span
+laco:OccurrenceShape a sh:NodeShape ;
+  sh:targetClass laco:Occurrence ;
+  sh:property [ sh:path laco:subject ; sh:minCount 1 ] ;
+  sh:property [ sh:path laco:object  ; sh:minCount 1 ] ;
+  sh:property [ sh:path laco:inFile  ; sh:minCount 1 ] ;
+  sh:property [ sh:path laco:span    ; sh:minCount 1 ] .

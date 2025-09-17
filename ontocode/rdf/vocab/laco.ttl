@@ -1,0 +1,109 @@
+@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix owl:  <http://www.w3.org/2002/07/owl#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+@prefix dct:  <http://purl.org/dc/terms/> .
+@prefix prov: <http://www.w3.org/ns/prov#> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+@prefix laco: <https://example.org/laco#> .
+
+laco: a owl:Ontology ;
+  dct:title "Language‑Agnostic Code Ontology" ;
+  dct:creator "Pranav + OntoCodeIndex" ;
+  dct:license "CC BY 4.0" .
+
+# Repositories and versioning
+laco:Repository a owl:Class .
+laco:Commit     a owl:Class .
+laco:Branch     a owl:Class .
+laco:Workspace  a owl:Class .
+
+# Artifacts
+laco:Artifact       a owl:Class .
+laco:SourceFile     a owl:Class ; rdfs:subClassOf laco:Artifact .
+laco:BinaryArtifact a owl:Class ; rdfs:subClassOf laco:Artifact .
+laco:Package        a owl:Class ; rdfs:subClassOf laco:Artifact .
+laco:BuildTarget    a owl:Class .
+
+# Program structure (kernel)
+laco:Unit        a owl:Class .           # any addressable program entity
+laco:Module      a owl:Class ; rdfs:subClassOf laco:Unit .
+laco:Namespace   a owl:Class ; rdfs:subClassOf laco:Unit .
+laco:Classifier  a owl:Class ; rdfs:subClassOf laco:Unit .  # class/struct/trait/enum holder
+laco:Callable    a owl:Class ; rdfs:subClassOf laco:Unit .  # function/method/lambda
+laco:Field       a owl:Class ; rdfs:subClassOf laco:Unit .
+laco:Variable    a owl:Class ; rdfs:subClassOf laco:Unit .
+laco:Parameter   a owl:Class ; rdfs:subClassOf laco:Unit .
+
+# Types
+laco:Type          a owl:Class ; rdfs:subClassOf laco:Unit .
+laco:CompositeType a owl:Class ; rdfs:subClassOf laco:Type .
+laco:FunctionType  a owl:Class ; rdfs:subClassOf laco:Type .
+laco:UnionType     a owl:Class ; rdfs:subClassOf laco:Type .
+laco:EnumType      a owl:Class ; rdfs:subClassOf laco:Type .
+laco:InterfaceType a owl:Class ; rdfs:subClassOf laco:Type .
+
+# Relations as first‑class occurrences
+laco:Occurrence a owl:Class .
+laco:Span       a owl:Class .
+laco:AstPath    a owl:Class .
+
+# Architecture (language neutral, optional)
+laco:Component a owl:Class .
+laco:Service   a owl:Class ; rdfs:subClassOf laco:Component .
+laco:Endpoint  a owl:Class ; rdfs:subClassOf laco:Component .
+
+# Identity & containment
+laco:defines      a owl:ObjectProperty ; rdfs:domain laco:Artifact ; rdfs:range laco:Unit .
+laco:declaredIn   a owl:ObjectProperty ; rdfs:domain laco:Unit ; rdfs:range laco:Artifact .
+laco:encloses     a owl:ObjectProperty ; rdfs:domain laco:Unit ; rdfs:range laco:Unit .
+laco:memberOf     a owl:ObjectProperty ; rdfs:domain laco:Unit ; rdfs:range laco:Unit .
+laco:qualifiedName a owl:DatatypeProperty ; rdfs:domain laco:Unit ; rdfs:range xsd:string .
+laco:symbolId      a owl:DatatypeProperty ; rdfs:domain laco:Unit ; rdfs:range xsd:string .
+
+# Typing & signatures
+laco:hasType      a owl:ObjectProperty ; rdfs:domain laco:Unit ; rdfs:range laco:Type .
+laco:returnsType  a owl:ObjectProperty ; rdfs:domain laco:Callable ; rdfs:range laco:Type .
+laco:hasParameter a owl:ObjectProperty ; rdfs:domain laco:Callable ; rdfs:range laco:Parameter .
+laco:position     a owl:DatatypeProperty ; rdfs:domain laco:Parameter ; rdfs:range xsd:integer .
+
+# Dependencies & usage
+laco:importsFrom a owl:ObjectProperty ; rdfs:domain laco:Artifact ; rdfs:range laco:Artifact .
+laco:exports     a owl:ObjectProperty ; rdfs:domain laco:Artifact ; rdfs:range laco:Unit .
+laco:dependsOn   a owl:ObjectProperty ; rdfs:domain laco:Package ; rdfs:range laco:Package .
+laco:calls       a owl:ObjectProperty ; rdfs:domain laco:Callable ; rdfs:range laco:Callable .
+laco:readsFrom   a owl:ObjectProperty ; rdfs:domain laco:Callable ; rdfs:range laco:Variable .
+laco:writesTo    a owl:ObjectProperty ; rdfs:domain laco:Callable ; rdfs:range laco:Variable .
+laco:references  a owl:ObjectProperty ; rdfs:domain laco:Unit ; rdfs:range laco:Unit .
+laco:extends     a owl:ObjectProperty ; rdfs:domain laco:Classifier ; rdfs:range laco:Classifier .
+laco:implements  a owl:ObjectProperty ; rdfs:domain laco:Classifier ; rdfs:range laco:InterfaceType .
+laco:overrides   a owl:ObjectProperty ; rdfs:domain laco:Callable ; rdfs:range laco:Callable .
+
+# Locations, evidence, versioning
+laco:span     a owl:ObjectProperty ; rdfs:domain laco:Unit ; rdfs:range laco:Span .
+laco:startLine a owl:DatatypeProperty ; rdfs:domain laco:Span ; rdfs:range xsd:integer .
+laco:endLine   a owl:DatatypeProperty ; rdfs:domain laco:Span ; rdfs:range xsd:integer .
+laco:startCol  a owl:DatatypeProperty ; rdfs:domain laco:Span ; rdfs:range xsd:integer .
+laco:endCol    a owl:DatatypeProperty ; rdfs:domain laco:Span ; rdfs:range xsd:integer .
+
+laco:astPath   a owl:DatatypeProperty ; rdfs:domain laco:Unit ; rdfs:range xsd:string .
+laco:atCommit  a owl:ObjectProperty ; rdfs:range laco:Commit .
+laco:inBranch  a owl:ObjectProperty ; rdfs:range laco:Branch .
+laco:sha256    a owl:DatatypeProperty ; rdfs:domain laco:Artifact ; rdfs:range xsd:string .
+
+# Visibility and attributes
+laco:visibility        a owl:DatatypeProperty ; rdfs:domain laco:Unit ; rdfs:range xsd:string .
+laco:isMutable         a owl:DatatypeProperty ; rdfs:domain laco:Unit ; rdfs:range xsd:boolean .
+laco:isConst           a owl:DatatypeProperty ; rdfs:domain laco:Unit ; rdfs:range xsd:boolean .
+laco:isExportedDefault a owl:DatatypeProperty ; rdfs:domain laco:Unit ; rdfs:range xsd:boolean .
+
+# Occurrence reification
+laco:ofRelation a owl:DatatypeProperty ; rdfs:domain laco:Occurrence ; rdfs:range xsd:string .
+laco:subject    a owl:ObjectProperty   ; rdfs:domain laco:Occurrence ; rdfs:range laco:Unit .
+laco:object     a owl:ObjectProperty   ; rdfs:domain laco:Occurrence ; rdfs:range laco:Unit .
+laco:inFile     a owl:ObjectProperty   ; rdfs:domain laco:Occurrence ; rdfs:range laco:SourceFile .
+
+# Named graph convention (documentation)
+# One named graph per file per commit:
+#   laco://repo/<name>/commit/<sha>/file/<url-encoded-path>
+# Master graph imports per‑file graphs for the current commit.

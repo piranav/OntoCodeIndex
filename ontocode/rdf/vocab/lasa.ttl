@@ -1,0 +1,51 @@
+@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+@prefix dct:  <http://purl.org/dc/terms/> .
+@prefix prov: <http://www.w3.org/ns/prov#> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+@prefix laco: <https://example.org/laco#> .
+@prefix lasa: <https://example.org/lasa#> .
+
+lasa: a rdfs:Class ; dct:title "Language‑Agnostic Semantic Annotations" .
+
+# Concept classes
+lasa:Role       a rdfs:Class .
+lasa:Concern    a rdfs:Class .
+lasa:Pattern    a rdfs:Class .
+lasa:Capability a rdfs:Class .
+lasa:Quality    a rdfs:Class .
+
+# Properties
+lasa:hasRole        a rdf:Property ; rdfs:domain laco:Unit ; rdfs:range lasa:Role .
+lasa:hasConcern     a rdf:Property ; rdfs:domain laco:Unit ; rdfs:range lasa:Concern .
+lasa:implementsPattern a rdf:Property ; rdfs:domain laco:Unit ; rdfs:range lasa:Pattern .
+lasa:hasCapability  a rdf:Property ; rdfs:domain laco:Unit ; rdfs:range lasa:Capability .
+lasa:hasQuality     a rdf:Property ; rdfs:domain laco:Unit ; rdfs:range lasa:Quality .
+
+# Evidence and provenance
+lasa:ruleId    a rdf:Property ; rdfs:range xsd:string .
+lasa:evidence  a rdf:Property .  # can point to laco:Occurrence or text
+
+# Suggested individuals (optional, can be extended)
+# Roles
+lasa:UIComponent       a lasa:Role .
+lasa:Controller        a lasa:Role .
+lasa:ServiceLayer      a lasa:Role .
+lasa:DataLayer         a lasa:Role .
+lasa:PresentationLayer a lasa:Role .
+lasa:RepositoryRole    a lasa:Role .
+lasa:DomainModel       a lasa:Role .
+
+# Capabilities
+lasa:HTTPEndpoint a lasa:Capability .
+lasa:DBAccess     a lasa:Capability .
+lasa:FileIO       a lasa:Capability .
+lasa:NetworkCall  a lasa:Capability .
+lasa:CacheAccess  a lasa:Capability .
+
+# Qualities
+lasa:Pure          a lasa:Quality .
+lasa:Impure        a lasa:Quality .
+lasa:Idempotent    a lasa:Quality .
+lasa:AsyncBoundary a lasa:Quality .

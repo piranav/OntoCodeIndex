@@ -1,0 +1,127 @@
+# R001: UI component by path or return type hint
+PREFIX laco: <https://example.org/laco#>
+PREFIX lasa: <https://example.org/lasa#>
+PREFIX dct:  <http://purl.org/dc/terms/>
+
+CONSTRUCT {
+  ?u lasa:hasRole lasa:UIComponent .
+}
+WHERE {
+  ?u a laco:Unit ; laco:declaredIn ?f .
+  ?f dct:path ?p .
+  FILTER(CONTAINS(?p, "/components/") || CONTAINS(?p, "/ui/"))
+}
+;
+
+# R010: TestCase by file naming
+CONSTRUCT {
+  ?u lasa:hasRole lasa:DomainModel .
+}
+WHERE {
+  ?u a laco:Classifier ; laco:declaredIn ?f .
+  ?f dct:path ?p .
+  FILTER(REGEX(?p, "(^|/)models?/", "i"))
+}
+;
+
+# R020: DB access by package import
+CONSTRUCT {
+  ?c lasa:hasCapability lasa:DBAccess .
+}
+WHERE {
+  ?c a laco:Callable ; laco:declaredIn ?f .
+  ?f laco:importsFrom ?pkg .
+  ?pkg a laco:Package ; dct:title ?name .
+  FILTER(?name IN ("@prisma/client","mongoose","typeorm","pg","psycopg","jdbc","hibernate"))
+}
+;
+
+# R021: Network calls by callee name
+CONSTRUCT {
+  ?c lasa:hasCapability lasa:NetworkCall .
+}
+WHERE {
+  ?c a laco:Callable .
+  ?occ a laco:Occurrence ; laco:subject ?c ; laco:object ?callee .
+  ?callee laco:qualifiedName ?qn .
+  FILTER(REGEX(LCASE(?qn), "(fetch|axios|requests\\.|httpclient|urlsession)", "i"))
+}
+;
+
+# R030: File IO by callee name
+CONSTRUCT {
+  ?c lasa:hasCapability lasa:FileIO .
+}
+WHERE {
+  ?c a laco:Callable .
+  ?occ a laco:Occurrence ; laco:subject ?c ; laco:object ?callee .
+  ?callee laco:qualifiedName ?qn .
+  FILTER(REGEX(LCASE(?qn), "(fs\\.|os\\.|pathlib|java\\.nio\\.file|System\\.IO)", "i"))
+}
+;
+
+# R040: Layering by imports and paths
+CONSTRUCT {
+  ?u lasa:hasRole ?role .
+}
+WHERE {
+  ?u a laco:Unit ; laco:declaredIn ?f .
+  ?f dct:path ?p .
+  BIND(CONTAINS(?p,"/app/") || CONTAINS(?p,"/pages/") AS ?pathLooksPresentation)
+  BIND(EXISTS { ?f laco:importsFrom ?pkg . ?pkg dct:title "react" } AS ?importsReact)
+  BIND(
+    EXISTS {
+      ?f laco:importsFrom ?pkg2 .
+      ?pkg2 dct:title ?pkgName .
+      FILTER(?pkgName IN ("@prisma/client","mongoose","typeorm","pg","psycopg"))
+    }
+    AS ?importsDataLayerLib
+  )
+  BIND(
+    IF(?pathLooksPresentation || ?importsReact,
+      lasa:PresentationLayer,
+      IF(?importsDataLayerLib,
+        lasa:DataLayer,
+        lasa:ServiceLayer
+      )
+    ) AS ?role
+  )
+}
+;
+
+# R050: Async boundary
+CONSTRUCT {
+  ?c lasa:hasQuality lasa:AsyncBoundary .
+}
+WHERE {
+  { ?c <https://example.org/laco/ts#isAsync> true }
+  UNION
+  { ?c a laco:Callable .
+    ?occ a laco:Occurrence ; laco:subject ?c ; laco:object ?callee .
+    ?callee laco:qualifiedName ?qn .
+    FILTER(REGEX(LCASE(?qn), "(bullmq|sqs|rabbitmq|celery|sidekiq)", "i")) }
+}
+;
+
+# R060: Pure callable heuristic (no writes, no IO, no network, no DB)
+CONSTRUCT {
+  ?c lasa:hasQuality lasa:Pure .
+}
+WHERE {
+  ?c a laco:Callable .
+  FILTER NOT EXISTS { ?c laco:writesTo ?v }
+  FILTER NOT EXISTS { ?c lasa:hasCapability lasa:DBAccess }
+  FILTER NOT EXISTS { ?c lasa:hasCapability lasa:FileIO }
+  FILTER NOT EXISTS { ?c lasa:hasCapability lasa:NetworkCall }
+}
+;
+
+# R070: Repository role by path or base class
+CONSTRUCT {
+  ?u lasa:hasRole lasa:RepositoryRole .
+}
+WHERE {
+  ?u a laco:Unit ; laco:declaredIn ?f .
+  ?f dct:path ?p .
+  FILTER(REGEX(?p, "/repo(sitory)?/|/repositories/", "i"))
+}

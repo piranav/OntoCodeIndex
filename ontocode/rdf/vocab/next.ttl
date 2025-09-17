@@ -1,0 +1,16 @@
+@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+@prefix laco: <https://example.org/laco#> .
+@prefix next: <https://example.org/next#> .
+
+next:Page       a rdfs:Class ; rdfs:subClassOf laco:Unit .
+next:Layout     a rdfs:Class ; rdfs:subClassOf laco:Unit .
+next:APIRoute   a rdfs:Class ; rdfs:subClassOf laco:Unit .
+next:Middleware a rdfs:Class ; rdfs:subClassOf laco:Unit .
+
+next:routePattern a rdf:Property ; rdfs:domain laco:Unit ; rdfs:range xsd:string .
+next:segmentType  a rdf:Property ; rdfs:domain laco:Unit ; rdfs:range xsd:string .
+next:runtime      a rdf:Property ; rdfs:domain laco:Unit ; rdfs:range xsd:string . # "node" | "edge"
+next:usesClient   a rdf:Property ; rdfs:domain laco:Unit ; rdfs:range xsd:boolean .
+next:usesServer   a rdf:Property ; rdfs:domain laco:Unit ; rdfs:range xsd:boolean .

@@ -1,0 +1,86 @@
+PREFIX laco: <https://example.org/laco#>
+PREFIX next: <https://example.org/next#>
+PREFIX lasa: <https://example.org/lasa#>
+PREFIX dct:  <http://purl.org/dc/terms/>
+
+# N001: Page component in app router
+CONSTRUCT {
+  ?u a next:Page ; next:segmentType "page" .
+}
+WHERE {
+  ?u a laco:Callable ; laco:declaredIn ?f ; laco:isExportedDefault true .
+  ?f dct:path ?p .
+  FILTER(REGEX(?p, "/app/.+/page\\.(tsx|jsx)$", "i"))
+}
+;
+
+# N002: Layout component
+CONSTRUCT {
+  ?u a next:Layout ; next:segmentType "layout" .
+}
+WHERE {
+  ?u a laco:Callable ; laco:declaredIn ?f ; laco:isExportedDefault true .
+  ?f dct:path ?p .
+  FILTER(REGEX(?p, "/app/.+/layout\\.(tsx|jsx)$", "i"))
+}
+;
+
+# N003: Middleware
+CONSTRUCT {
+  ?u a next:Middleware .
+}
+WHERE {
+  ?u a laco:Callable ; laco:declaredIn ?f .
+  ?f dct:path ?p .
+  FILTER(REGEX(?p, "/middleware\\.(ts|js)$", "i"))
+}
+;
+
+# N004: API Route in app router
+CONSTRUCT {
+  ?u a next:APIRoute ; next:segmentType "route" .
+}
+WHERE {
+  ?u a laco:Callable ; laco:declaredIn ?f .
+  ?f dct:path ?p .
+  FILTER(REGEX(?p, "/app/.+/route\\.(ts|js)$", "i"))
+}
+;
+
+# N010: routePattern from file path (simple mapping)
+CONSTRUCT {
+  ?u next:routePattern ?pattern .
+}
+WHERE {
+  ?u a laco:Unit ; laco:declaredIn ?f .
+  ?f dct:path ?p .
+  BIND(REPLACE(?p, ".*?/app", "") AS ?seg)
+  BIND(REPLACE(?seg, "/(page|layout|route)[.](tsx|jsx|ts|js)$", "") AS ?dir)
+  # Map [id] and [[...slug]] to Next.js URL patterns using character-class escapes
+  BIND(REPLACE(?dir, "[[][[][.][.][.]([A-Za-z0-9_-]+)[]][]]", "*$1") AS ?spread)
+  BIND(REPLACE(?spread, "[[]([A-Za-z0-9_-]+)[]]", ":$1") AS ?pattern)
+}
+;
+
+# N020: runtime from exported const runtime
+CONSTRUCT {
+  ?u next:runtime ?rt .
+}
+WHERE {
+  ?u a next:APIRoute ; laco:declaredIn ?f .
+  ?f laco:exports ?cfg .
+  ?cfg laco:qualifiedName ?qn ; laco:hasType ?t .
+  FILTER(?qn = "runtime")
+  ?t dct:title ?rt . # "edge" or "node"
+}
+;
+
+# N030: usesClient via top-of-file directive
+CONSTRUCT {
+  ?u next:usesClient true .
+}
+WHERE {
+  ?u a next:Page ; laco:declaredIn ?f .
+  ?f laco:exports ?u .
+  ?f <https://example.org/laco/ts#hasUseClientDirective> true
+}

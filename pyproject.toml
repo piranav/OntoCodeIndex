@@ -1,0 +1,74 @@
+[build-system]
+requires = ["hatchling>=1.18"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ontocode"
+version = "0.1.0"
+description = "Convert codebases into RDF ontologies using LACO/LASA for deterministic analysis."
+readme = "README.md"
+authors = [
+  { name = "OntoCodeIndex" }
+]
+license = { file = "LICENSE" }
+requires-python = ">=3.11"
+dependencies = [
+  "typer[all]>=0.9",
+  "rdflib>=7.0",
+  "pyshacl>=0.20",
+  "pydantic>=2.5",
+  "rich>=13.0",
+  "orjson>=3.9",
+  "tqdm>=4.65",
+  "pyyaml>=6.0",
+  "uvloop>=0.19; platform_system != 'Windows'"
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=7.4",
+  "pytest-cov>=4.1",
+  "mypy>=1.7",
+  "ruff>=0.1.13",
+  "black>=23.12"
+]
+
+[project.scripts]
+ontocode = "ontocode.cli:app"
+
+[tool.typer]
+# Enables rich tracebacks by default.
+show_rich_errors = true
+
+[tool.black]
+target-version = ["py311"]
+line-length = 88
+
+[tool.ruff]
+select = ["E", "F", "I", "UP", "B", "ANN", "S"]
+ignore = ["ANN101", "ANN102", "ANN401", "S101"]
+line-length = 88
+src = ["ontocode", "tests"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = true
+skip-magic-trailing-comma = false
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_return_any = true
+warn_unreachable = true
+show_error_codes = true
+plugins = ["pydantic.mypy"]
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = "-ra"
+python_files = ["test_*.py"]
+pythonpath = ["."]

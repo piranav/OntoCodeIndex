@@ -1,0 +1,16 @@
+@prefix sh:   <http://www.w3.org/ns/shacl#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+@prefix laco: <https://example.org/laco#> .
+@prefix next: <https://example.org/next#> .
+
+# Page must be default export and live under app/**/page.{tsx,jsx}
+next:PageShape a sh:NodeShape ;
+  sh:targetClass next:Page ;
+  sh:property [ sh:path laco:isExportedDefault ; sh:hasValue true ] ;
+  sh:property [ sh:path next:routePattern ; sh:minCount 1 ] .
+
+# APIRoute must have routePattern and runtime in {node, edge}
+next:ApiRouteShape a sh:NodeShape ;
+  sh:targetClass next:APIRoute ;
+  sh:property [ sh:path next:routePattern ; sh:minCount 1 ] ;
+  sh:property [ sh:path next:runtime ; sh:in ( "node" "edge" ) ] .
