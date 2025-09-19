@@ -8,21 +8,23 @@ import json
 import logging
 import re
 import shutil
+from collections import Counter
 from datetime import datetime, timezone
+from importlib.metadata import PackageNotFoundError, version as pkg_version
 from pathlib import Path
 from typing import Callable, Iterable, Optional
 
 import typer
 import yaml
 from rdflib import Graph, Literal, URIRef
-from rdflib.namespace import DCTERMS, RDF, RDFS, XSD
+from rdflib.namespace import DCTERMS, RDF, RDFS, SH, XSD
 
 from .config import LspConfig, OntoCodeConfig
 from .extract.ts_bridge import TsExtractorRunner
 from .git_utils import git_rev_parse
 from .logging import configure_logging, get_logger
 from .paths import ensure_out_dir, encode_path_for_graph, flatten_relative_path
-from .plugins.typescript.mapping import LACO, NEXT, TS_EXT, MappingContext, SymbolIndex, apply_mapping
+from .plugins.typescript.mapping import LACO, LASA, NEXT, TS_EXT, MappingContext, SymbolIndex, apply_mapping
 from .rdf.rules_runner import run_rule_packs
 from .rdf.shacl_runner import run_shacl as execute_shacl
 from .rdf.writer import write_graph
@@ -215,6 +217,9 @@ def _copy_static_assets(target_vocab: Path, commit_dir: Path) -> None:
                 LOGGER.warning("Unable to copy %s asset %s: %s", label, source, error)
 
     _safe_copy_tree(VOCAB_ROOT, target_vocab, "vocab")
+    commit_vocab = commit_dir / "vocab"
+    commit_vocab.mkdir(parents=True, exist_ok=True)
+    _safe_copy_tree(VOCAB_ROOT, commit_vocab, "vocab")
     shapes_dir = commit_dir / "shapes"
     shapes_dir.mkdir(parents=True, exist_ok=True)
     _safe_copy_tree(SHAPES_ROOT, shapes_dir, "shapes")
@@ -240,10 +245,15 @@ def _relative_to_repo(repo_path: Path, target: Path) -> str:
         return target.as_posix()
 
 
+ESSENTIAL_PREFIXES: set[str] = {"rdf", "rdfs", "owl", "xsd", "dct", "laco", "lasa", "next", "prov", "ts"}
+
+
 def _collect_prefixes(graph: Graph) -> dict[str, str]:
     prefixes: dict[str, str] = {}
     for prefix, namespace in graph.namespace_manager.namespaces():
-        if prefix:
+        if not prefix:
+            continue
+        if prefix in ESSENTIAL_PREFIXES:
             prefixes[prefix] = str(namespace)
     return prefixes
 
@@ -294,7 +304,20 @@ def _gather_vocab_files(commit_dir: Path, out_root: Path) -> list[Path]:
                 continue
             seen.add(item)
             vocab_paths.append(item)
+        if vocab_paths:
+            break
     return vocab_paths
+
+
+def _histogram(graph: Graph, predicate: URIRef) -> list[dict[str, object]]:
+    counter: Counter[URIRef] = Counter()
+    for value in graph.objects(None, predicate):
+        counter[value] += 1
+    entries: list[dict[str, object]] = []
+    for term, count in sorted(counter.items(), key=lambda item: (-item[1], str(item[0]))):
+        identifier = _to_curie(graph, term) if isinstance(term, URIRef) else str(term)
+        entries.append({"id": identifier, "count": int(count)})
+    return entries
 
 
 def _emit_mount(
@@ -334,6 +357,8 @@ def _emit_ontology_meta(
     facts_union: Graph,
     inferred_graph: Graph,
     rule_packs: list[dict[str, str]],
+    shacl_summary: dict[str, object] | None,
+    build_info: dict[str, object],
 ) -> None:
     combined = Graph()
     for prefix, namespace in facts_union.namespace_manager.namespaces():
@@ -422,6 +447,16 @@ def _emit_ontology_meta(
         ),
     }
 
+    histograms = {
+        "capabilities": _histogram(combined, LASA.hasCapability),
+        "qualities": _histogram(combined, LASA.hasQuality),
+        "roles": _histogram(combined, LASA.hasRole),
+    }
+
+    total_query = combined.query("SELECT (COUNT(?s) AS ?count) WHERE { ?s ?p ?o }")
+    total_row = next(iter(total_query), None)
+    union_triples = int(total_row[0].toPython()) if total_row else len(combined)
+
     payload = {
         "tbox": {
             "classes": class_rows,
@@ -432,6 +467,20 @@ def _emit_ontology_meta(
         "abox_samples": sample_queries,
         "vocabulary_versions": vocab_versions,
     }
+
+    payload["histograms"] = histograms
+
+    payload["stats"] = {"union_triples": union_triples}
+
+    if shacl_summary is not None:
+        payload["shacl"] = shacl_summary
+
+    payload["build_info"] = build_info
+    if "ontocode_version" in build_info:
+        payload.setdefault("ontocode_version", build_info["ontocode_version"])
+    for key in ("rules_core_sha", "rules_next_sha", "rules_ext_sha"):
+        if key in build_info:
+            payload.setdefault(key, build_info[key])
 
     meta_path = commit_dir / "ontology_meta.json"
     _write_json(meta_path, payload)
@@ -573,6 +622,7 @@ def build(
         )
 
     inferred_graph = Graph()
+    rules_dir = commit_dir / "rules"
     if config.emit_inferred:
         rule_files: list[Path] = [RULES_ROOT / "rules-core.rq"]
         if config.nextjs:
@@ -591,6 +641,22 @@ def build(
         if len(inferred_graph):
             write_graph(inferred_graph, inferred_dir / "merged.ttl")
 
+    try:
+        ontocode_version = pkg_version("ontocode")
+    except PackageNotFoundError:
+        ontocode_version = "0.0.0-dev"
+    rule_hashes: dict[str, str] = {}
+    for filename, key in (
+        ("rules-core.rq", "rules_core_sha"),
+        ("rules-next.rq", "rules_next_sha"),
+        ("rules-ext.rq", "rules_ext_sha"),
+    ):
+        candidate = rules_dir / filename
+        if candidate.exists():
+            rule_hashes[key] = _hash_file(candidate)
+
+    shacl_summary: dict[str, object] | None = None
+
     if config.run_shacl:
         validation_graph = Graph()
         validation_graph += facts_union
@@ -601,7 +667,14 @@ def build(
             shapes.append(SHAPES_ROOT / "next.shapes.ttl")
         conforms, report = execute_shacl(validation_graph, shapes)
         LOGGER.info("SHACL validation %s", "passed" if conforms else "failed")
-        write_graph(report, reports_dir / "shacl_report.ttl")
+        report_path = reports_dir / "shacl_report.ttl"
+        write_graph(report, report_path)
+        violation_count = sum(1 for _ in report.triples((None, RDF.type, SH.ValidationResult)))
+        shacl_summary = {
+            "conforms": bool(conforms),
+            "violations": int(violation_count),
+            "report_file": _relative_to_repo(repo_path, report_path),
+        }
 
     if config.emit_mount:
         _emit_mount(
@@ -614,12 +687,15 @@ def build(
         )
 
     if config.emit_meta:
+        build_info = {"ontocode_version": ontocode_version, **rule_hashes}
         _emit_ontology_meta(
             out_root=out_root,
             commit_dir=commit_dir,
             facts_union=facts_union,
             inferred_graph=inferred_graph,
             rule_packs=rule_pack_events,
+            shacl_summary=shacl_summary,
+            build_info=build_info,
         )
 
     LOGGER.info("Extraction complete. Results written to %s", commit_dir)

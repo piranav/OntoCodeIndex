@@ -127,6 +127,7 @@ def test_mount_artifact(build_output: dict[str, Path], union_graph: Graph) -> No
     repo = build_output["repo"]
     for vocab_relative in payload["vocab_files"]:
         assert (repo / vocab_relative).exists(), f"Missing vocab file {vocab_relative}"
+        assert "/commit/" in vocab_relative, "Expected vocab to be scoped per commit"
     facts_graph = Graph()
     for ttl_file in facts_dir.glob("*.ttl"):
         facts_graph.parse(ttl_file)
@@ -153,6 +154,10 @@ def test_meta_content(build_output: dict[str, Path], union_graph: Graph) -> None
     meta_path = build_output["meta"]
     assert meta_path.exists(), "Expected ontology_meta.json to be emitted"
     payload = json.loads(meta_path.read_text(encoding="utf-8"))
+    total_query = union_graph.query("SELECT (COUNT(?s) AS ?count) WHERE { ?s ?p ?o }")
+    total_row = next(iter(total_query), None)
+    assert total_row is not None
+    total_count = int(total_row[0].toPython())
     classes = {entry["id"]: int(entry["count"]) for entry in payload["tbox"]["classes"]}
     assert "laco:Callable" in classes
     assert "laco:SourceFile" in classes
@@ -167,6 +172,18 @@ def test_meta_content(build_output: dict[str, Path], union_graph: Graph) -> None
         assert key in versions and len(versions[key]) == 64
     rule_packs = payload.get("rbox", {}).get("rule_packs", [])
     assert rule_packs, "Expected rule pack timestamps"
+    histograms = payload.get("histograms", {})
+    assert {"capabilities", "qualities", "roles"} <= histograms.keys()
+    for values in histograms.values():
+        assert isinstance(values, list)
+    stats = payload.get("stats", {})
+    assert stats.get("union_triples") == total_count
+    shacl_info = payload.get("shacl")
+    assert shacl_info and "conforms" in shacl_info
+    assert shacl_info["report_file"].endswith("/reports/shacl_report.ttl")
+    assert payload.get("ontocode_version")
+    assert payload.get("rules_core_sha")
+    assert payload.get("rules_next_sha")
 
 
 def test_disable_mount_meta(tmp_path: Path) -> None:
