@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
-from typing import Iterable
+from typing import Callable, Iterable
 
 from rdflib import Graph
 
@@ -24,7 +25,11 @@ def _split_constructs(body_text: str) -> list[str]:
     return segments
 
 
-def run_rule_packs(facts: Graph, rule_files: Iterable[Path]) -> Graph:
+def run_rule_packs(
+    facts: Graph,
+    rule_files: Iterable[Path],
+    on_rule_finished: Callable[[Path, datetime], None] | None = None,
+) -> Graph:
     """Execute a sequence of SPARQL CONSTRUCT rule files and return inferred triples."""
     working = Graph()
     working += facts
@@ -51,6 +56,8 @@ def run_rule_packs(facts: Graph, rule_files: Iterable[Path]) -> Graph:
                 result_graph = temp
             inferred_total += result_graph
             working += result_graph
+        if on_rule_finished is not None:
+            on_rule_finished(rule_path, datetime.utcnow())
     return inferred_total
 
 

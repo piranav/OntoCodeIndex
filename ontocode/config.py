@@ -21,6 +21,8 @@ class OntoCodeConfig(BaseModel):
     nextjs: bool = True
     out_dir: str = ".ontology"
     emit_inferred: bool = True
+    emit_mount: bool = True
+    emit_meta: bool = True
     run_shacl: bool = True
     lsp_augment: bool = False
     max_workers: int = 4

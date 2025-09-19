@@ -3,22 +3,25 @@
 from __future__ import annotations
 
 import fnmatch
+import hashlib
+import json
 import logging
 import re
 import shutil
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Callable, Iterable, Optional
 
 import typer
 import yaml
 from rdflib import Graph, Literal, URIRef
-from rdflib.namespace import DCTERMS, RDF
+from rdflib.namespace import DCTERMS, RDF, RDFS, XSD
 
 from .config import LspConfig, OntoCodeConfig
 from .extract.ts_bridge import TsExtractorRunner
 from .git_utils import git_rev_parse
 from .logging import configure_logging, get_logger
-from .paths import ensure_out_dir, encode_path_for_graph
+from .paths import ensure_out_dir, encode_path_for_graph, flatten_relative_path
 from .plugins.typescript.mapping import LACO, NEXT, TS_EXT, MappingContext, SymbolIndex, apply_mapping
 from .rdf.rules_runner import run_rule_packs
 from .rdf.shacl_runner import run_shacl as execute_shacl
@@ -101,26 +104,46 @@ def _collect_language_files(repo: Path, languages: Iterable[str], ignore_pattern
 
 
 def _derive_route_pattern(relative_path: str) -> str:
-    try:
-        sub_path = relative_path.split("app/", 1)[1]
-    except IndexError:
-        return f"/{relative_path.strip('/')}"
-    cleaned = re.sub(r"\.(tsx|jsx|ts|js)$", "", sub_path)
-    segments = []
-    for segment in cleaned.split("/"):
-        if segment in {"page", "layout", "route"}:
+    cleaned_path = relative_path.strip("/")
+    if not cleaned_path:
+        return "/"
+
+    segments = cleaned_path.split("/")
+    in_app = "app" in segments
+    route_segments: list[str]
+    if in_app:
+        # Use the portion after the first "app/" directory for app router entries
+        app_index = segments.index("app")
+        route_segments = segments[app_index + 1 :]
+    elif segments[0] == "pages":
+        # Drop the leading "pages" directory for pages router files
+        route_segments = segments[1:]
+    else:
+        route_segments = segments
+
+    normalized: list[str] = []
+
+    for idx, segment in enumerate(route_segments):
+        base = re.sub(r"\.(tsx|jsx|ts|js)$", "", segment, flags=re.IGNORECASE)
+        if not base:
             continue
-        if not segment:
+        if in_app and base in {"page", "layout", "route", "default"}:
             continue
-        if segment.startswith("[[...") and segment.endswith("]]"):
-            segments.append("*" + segment[4:-2])
-        elif segment.startswith("[...") and segment.endswith("]"):
-            segments.append("*" + segment[4:-1])
-        elif segment.startswith("[") and segment.endswith("]"):
-            segments.append(":" + segment[1:-1])
+        if base == "index" and (normalized or idx == len(route_segments) - 1):
+            continue
+
+        if base.startswith("[[...") and base.endswith("]]"):
+            normalized.append("*" + base[4:-2])
+        elif base.startswith("[...") and base.endswith("]"):
+            normalized.append("*" + base[4:-1])
+        elif base.startswith("[") and base.endswith("]"):
+            normalized.append(":" + base[1:-1])
         else:
-            segments.append(segment)
-    return "/" + "/".join(segments).replace("//", "/") if segments else "/"
+            normalized.append(base)
+
+    pattern = "/" + "/".join(normalized)
+    pattern = re.sub(r"/{2,}", "/", pattern)
+    return pattern if normalized else "/"
 
 
 def _python_inference(facts: Graph) -> Graph:
@@ -138,23 +161,39 @@ def _python_inference(facts: Graph) -> Graph:
             for unit in facts.objects(file_iri, LACO.defines)
             if (unit, LACO.isExportedDefault, Literal(True)) in facts
         ]
-        if relative_path.startswith("app/"):
-            if relative_path.endswith("page.tsx") or relative_path.endswith("page.jsx"):
+
+        app_suffix = None
+        if "app/" in relative_path:
+            app_suffix = relative_path.split("app/", 1)[1]
+
+        if app_suffix:
+            lower_suffix = app_suffix.lower()
+            if lower_suffix.endswith("page.tsx") or lower_suffix.endswith("page.jsx") or lower_suffix.endswith("page.ts"):
                 for unit in default_units:
                     inferred.add((unit, RDF.type, NEXT.Page))
                     inferred.add((unit, NEXT.segmentType, Literal("page")))
                     inferred.add((unit, NEXT.routePattern, Literal(_derive_route_pattern(relative_path))))
                     if (file_iri, TS_EXT.hasUseClientDirective, Literal(True)) in facts:
                         inferred.add((unit, NEXT.usesClient, Literal(True)))
-            if relative_path.endswith("layout.tsx") or relative_path.endswith("layout.jsx"):
+            if lower_suffix.endswith("layout.tsx") or lower_suffix.endswith("layout.jsx"):
                 for unit in default_units:
                     inferred.add((unit, RDF.type, NEXT.Layout))
                     inferred.add((unit, NEXT.segmentType, Literal("layout")))
-            if relative_path.endswith("route.ts") or relative_path.endswith("route.js"):
+            if lower_suffix.endswith("route.ts") or lower_suffix.endswith("route.js") or lower_suffix.endswith("route.tsx") or lower_suffix.endswith("route.jsx"):
                 for unit in facts.objects(file_iri, LACO.defines):
                     inferred.add((unit, RDF.type, NEXT.APIRoute))
                     inferred.add((unit, NEXT.segmentType, Literal("route")))
                     inferred.add((unit, NEXT.routePattern, Literal(_derive_route_pattern(relative_path))))
+
+        pages_suffix = None
+        if "pages/" in relative_path:
+            pages_suffix = relative_path.split("pages/", 1)[1]
+
+        if pages_suffix and pages_suffix.startswith("api/"):
+            for unit in default_units:
+                inferred.add((unit, RDF.type, NEXT.APIRoute))
+                inferred.add((unit, NEXT.segmentType, Literal("route")))
+                inferred.add((unit, NEXT.routePattern, Literal(_derive_route_pattern(relative_path))))
     return inferred
 
 
@@ -184,6 +223,220 @@ def _copy_static_assets(target_vocab: Path, commit_dir: Path) -> None:
     _safe_copy_tree(RULES_ROOT, rules_dir, "rules")
 
 
+def _format_timestamp(dt: datetime) -> str:
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _now_utc_iso() -> str:
+    return _format_timestamp(datetime.now(timezone.utc))
+
+
+def _relative_to_repo(repo_path: Path, target: Path) -> str:
+    try:
+        return target.relative_to(repo_path).as_posix()
+    except ValueError:
+        return target.as_posix()
+
+
+def _collect_prefixes(graph: Graph) -> dict[str, str]:
+    prefixes: dict[str, str] = {}
+    for prefix, namespace in graph.namespace_manager.namespaces():
+        if prefix:
+            prefixes[prefix] = str(namespace)
+    return prefixes
+
+
+def _write_json(path: Path, payload: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=2)
+        handle.write("\n")
+
+
+def _to_curie(graph: Graph, term: URIRef) -> str:
+    try:
+        return graph.namespace_manager.normalizeUri(term)
+    except Exception:
+        return str(term)
+
+
+def _label_for(graph: Graph, term: URIRef) -> str:
+    label = graph.value(term, RDFS.label) or graph.value(term, DCTERMS.title)
+    if label is not None:
+        return str(label)
+    text = str(term)
+    if "#" in text:
+        return text.rsplit("#", 1)[-1]
+    if "/" in text:
+        return text.rstrip("/").rsplit("/", 1)[-1]
+    return text
+
+
+def _hash_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(8192), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _gather_vocab_files(commit_dir: Path, out_root: Path) -> list[Path]:
+    candidates = [commit_dir / "vocab", out_root / "vocab"]
+    seen: set[Path] = set()
+    vocab_paths: list[Path] = []
+    for candidate in candidates:
+        if not candidate.exists():
+            continue
+        for item in sorted(candidate.glob("*.ttl")):
+            if item in seen:
+                continue
+            seen.add(item)
+            vocab_paths.append(item)
+    return vocab_paths
+
+
+def _emit_mount(
+    *,
+    repo_path: Path,
+    out_root: Path,
+    commit_dir: Path,
+    commit_sha: str,
+    graph_index: list[dict[str, object]],
+    facts_union: Graph,
+) -> None:
+    if not graph_index:
+        return
+    mount_path = commit_dir / "mount.json"
+    facts_dir = commit_dir / "facts" / "files"
+    inferred_path = commit_dir / "inferred" / "merged.ttl"
+    vocab_paths = _gather_vocab_files(commit_dir, out_root)
+    payload: dict[str, object] = {
+        "dataset_id": f"ontocode:{repo_path.name}@{commit_sha}",
+        "commit_sha": commit_sha,
+        "created_at": _now_utc_iso(),
+        "union_default_graph": True,
+        "facts_dir": _relative_to_repo(repo_path, facts_dir),
+        "inferred_file": _relative_to_repo(repo_path, inferred_path),
+        "vocab_files": [_relative_to_repo(repo_path, path) for path in vocab_paths],
+        "prefixes": _collect_prefixes(facts_union),
+        "graph_index": sorted(graph_index, key=lambda entry: str(entry.get("ttl_file", ""))),
+        "notes": "Load vocab + all shards + inferred into a single dataset; treat default graph as UNION.",
+    }
+    _write_json(mount_path, payload)
+
+
+def _emit_ontology_meta(
+    *,
+    out_root: Path,
+    commit_dir: Path,
+    facts_union: Graph,
+    inferred_graph: Graph,
+    rule_packs: list[dict[str, str]],
+) -> None:
+    combined = Graph()
+    for prefix, namespace in facts_union.namespace_manager.namespaces():
+        if prefix:
+            combined.bind(prefix, namespace)
+    combined += facts_union
+    if len(inferred_graph):
+        combined += inferred_graph
+
+    class_rows: list[dict[str, object]] = []
+    class_query = """
+        SELECT ?cls (COUNT(?s) AS ?count)
+        WHERE { ?s a ?cls }
+        GROUP BY ?cls
+        ORDER BY DESC(?count)
+    """
+    for row in combined.query(class_query):
+        cls = row[0]
+        if not isinstance(cls, URIRef):
+            continue
+        count_value = row[1]
+        try:
+            count = int(count_value.toPython())
+        except Exception:  # pragma: no cover - defensive
+            continue
+        class_rows.append(
+            {
+                "id": _to_curie(combined, cls),
+                "label": _label_for(combined, cls),
+                "count": count,
+            }
+        )
+    class_rows.sort(key=lambda entry: (-int(entry["count"]), str(entry["id"])))
+
+    prop_rows = combined.query(
+        """
+        SELECT DISTINCT ?p (DATATYPE(?o) AS ?dt)
+        WHERE { ?s ?p ?o }
+        LIMIT 10000
+        """
+    )
+    object_props: dict[URIRef, dict[str, object]] = {}
+    data_props: dict[URIRef, dict[str, object]] = {}
+    for row in prop_rows:
+        prop = row.p
+        if not isinstance(prop, URIRef):
+            continue
+        datatype = row.dt if hasattr(row, "dt") else None
+        store = data_props if datatype else object_props
+        entry = store.get(prop)
+        if entry is None:
+            entry = {"id": _to_curie(combined, prop)}
+            store[prop] = entry
+        domain_term = combined.value(prop, RDFS.domain)
+        range_term = combined.value(prop, RDFS.range)
+        if datatype:
+            entry.setdefault("range", _to_curie(combined, datatype))
+            if isinstance(domain_term, URIRef):
+                entry.setdefault("on", _to_curie(combined, domain_term))
+            if isinstance(range_term, URIRef):
+                entry.setdefault("range", _to_curie(combined, range_term))
+        else:
+            if isinstance(domain_term, URIRef):
+                entry.setdefault("domain", _to_curie(combined, domain_term))
+            if isinstance(range_term, URIRef):
+                entry.setdefault("range", _to_curie(combined, range_term))
+
+    object_properties = [dict(value) for value in object_props.values()]
+    data_properties = [dict(value) for value in data_props.values()]
+    object_properties.sort(key=lambda entry: str(entry["id"]))
+    data_properties.sort(key=lambda entry: str(entry["id"]))
+
+    vocab_versions: dict[str, str] = {}
+    for path in _gather_vocab_files(commit_dir, out_root):
+        key = f"{path.name}_sha256"
+        vocab_versions[key] = _hash_file(path)
+
+    sample_queries = {
+        "callable_sample_query": (
+            "PREFIX laco:<https://example.org/laco#> PREFIX dct:<http://purl.org/dc/terms/> "
+            "SELECT ?fn ?file ?start ?end ?qn WHERE { ?fn a laco:Callable ; laco:qualifiedName ?qn ; "
+            "laco:declaredIn ?file ; laco:span [ laco:startLine ?start ; laco:endLine ?end ] . } LIMIT 3"
+        ),
+        "call_edge_sample_query": (
+            "PREFIX laco:<https://example.org/laco#> SELECT ?caller ?callee WHERE { ?caller laco:calls ?callee . } LIMIT 3"
+        ),
+    }
+
+    payload = {
+        "tbox": {
+            "classes": class_rows,
+            "object_properties": object_properties,
+            "data_properties": data_properties,
+        },
+        "rbox": {"rule_packs": rule_packs},
+        "abox_samples": sample_queries,
+        "vocabulary_versions": vocab_versions,
+    }
+
+    meta_path = commit_dir / "ontology_meta.json"
+    _write_json(meta_path, payload)
+
+
 @app.command("build")
 def build(
     repo: Path = typer.Option(..., exists=True, dir_okay=True, file_okay=False, help="Path to repository root."),
@@ -192,6 +445,8 @@ def build(
     nextjs: bool = typer.Option(True, help="Enable Next.js rule extensions."),
     out_dir: Path = typer.Option(Path(".ontology"), help="Output directory relative to repo."),
     emit_inferred: bool = typer.Option(True, help="Run rule packs and write inferred triples."),
+    emit_mount: bool = typer.Option(True, help="Emit mount.json metadata."),
+    emit_meta: bool = typer.Option(True, help="Emit ontology_meta.json metadata."),
     run_shacl: bool = typer.Option(True, help="Execute SHACL validation."),
     lsp_augment: bool = typer.Option(False, help="Augment extraction with LSP cross-file data."),
     max_workers: int = typer.Option(4, min=1, help="Max worker count (reserved for future use)."),
@@ -207,6 +462,8 @@ def build(
         "nextjs": nextjs,
         "out_dir": str(out_dir),
         "emit_inferred": emit_inferred,
+        "emit_mount": emit_mount,
+        "emit_meta": emit_meta,
         "run_shacl": run_shacl,
         "lsp_augment": lsp_augment,
         "max_workers": max_workers,
@@ -280,6 +537,9 @@ def build(
     facts_union.bind("lasa", "https://example.org/lasa#")
     facts_union.bind("next", "https://example.org/next#")
     facts_union.bind("dct", "http://purl.org/dc/terms/")
+    facts_union.bind("xsd", str(XSD))
+
+    graph_index: list[dict[str, object]] = []
 
     for result in extraction_results:
         payload = result.payload
@@ -290,8 +550,27 @@ def build(
         relative = payload.get("filePath")
         if not isinstance(relative, str) or not relative:
             continue
-        encoded_name = f"{encode_path_for_graph(Path(relative))}.ttl"
-        write_graph(graph, facts_dir / encoded_name)
+        flattened_name = flatten_relative_path(relative)
+        target_path = facts_dir / Path(f"{flattened_name}.ttl")
+        write_graph(graph, target_path)
+        graph_index.append(
+            {
+                "ttl_file": target_path.name,
+                "source_path": Path(relative).as_posix(),
+                "graph_iri": str(context.file_iri(relative)),
+                "triples": int(len(graph)),
+            }
+        )
+
+    rule_pack_events: list[dict[str, str]] = []
+
+    def _record_rule(rule_path: Path, timestamp: datetime) -> None:
+        rule_pack_events.append(
+            {
+                "name": rule_path.name,
+                "applied_at": _format_timestamp(timestamp),
+            }
+        )
 
     inferred_graph = Graph()
     if config.emit_inferred:
@@ -299,7 +578,11 @@ def build(
         if config.nextjs:
             rule_files.append(RULES_ROOT / "rules-next.rq")
         try:
-            inferred_graph = run_rule_packs(facts_union, rule_files)
+            inferred_graph = run_rule_packs(
+                facts_union,
+                rule_files,
+                on_rule_finished=_record_rule,
+            )
         except Exception as exc:  # pragma: no cover - defensive fallback
             LOGGER.error("Rule packs failed: %s", exc)
             inferred_graph = Graph()
@@ -319,5 +602,24 @@ def build(
         conforms, report = execute_shacl(validation_graph, shapes)
         LOGGER.info("SHACL validation %s", "passed" if conforms else "failed")
         write_graph(report, reports_dir / "shacl_report.ttl")
+
+    if config.emit_mount:
+        _emit_mount(
+            repo_path=repo_path,
+            out_root=out_root,
+            commit_dir=commit_dir,
+            commit_sha=commit_sha,
+            graph_index=graph_index,
+            facts_union=facts_union,
+        )
+
+    if config.emit_meta:
+        _emit_ontology_meta(
+            out_root=out_root,
+            commit_dir=commit_dir,
+            facts_union=facts_union,
+            inferred_graph=inferred_graph,
+            rule_packs=rule_pack_events,
+        )
 
     LOGGER.info("Extraction complete. Results written to %s", commit_dir)

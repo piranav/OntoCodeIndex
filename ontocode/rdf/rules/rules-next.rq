@@ -43,22 +43,52 @@ CONSTRUCT {
 WHERE {
   ?u a laco:Callable ; laco:declaredIn ?f .
   ?f dct:path ?p .
-  FILTER(REGEX(?p, "/app/.+/route\\.(ts|js)$", "i"))
+  FILTER(REGEX(?p, "/app/.+/route\\.(ts|js|tsx|jsx)$", "i"))
 }
 ;
 
-# N010: routePattern from file path (simple mapping)
+# N005: API Route in pages router
+CONSTRUCT {
+  ?u a next:APIRoute ; next:segmentType "route" .
+}
+WHERE {
+  ?u a laco:Callable ; laco:declaredIn ?f ; laco:isExportedDefault true .
+  ?f dct:path ?p .
+  FILTER(REGEX(?p, "/pages/api/.+\\.(ts|js|tsx|jsx)$", "i"))
+}
+;
+
+# N010: routePattern for app router entrypoints
 CONSTRUCT {
   ?u next:routePattern ?pattern .
 }
 WHERE {
   ?u a laco:Unit ; laco:declaredIn ?f .
   ?f dct:path ?p .
-  BIND(REPLACE(?p, ".*?/app", "") AS ?seg)
-  BIND(REPLACE(?seg, "/(page|layout|route)[.](tsx|jsx|ts|js)$", "") AS ?dir)
-  # Map [id] and [[...slug]] to Next.js URL patterns using character-class escapes
-  BIND(REPLACE(?dir, "[[][[][.][.][.]([A-Za-z0-9_-]+)[]][]]", "*$1") AS ?spread)
-  BIND(REPLACE(?spread, "[[]([A-Za-z0-9_-]+)[]]", ":$1") AS ?pattern)
+  FILTER(REGEX(?p, "/app/.+/(page|layout|route|default)\\.(tsx|jsx|ts|js)$", "i"))
+  BIND(REPLACE(?p, "^.*?/app", "", "i") AS ?subpath)
+  BIND(REPLACE(?subpath, "/(page|layout|route|default)\\.(tsx|jsx|ts|js)$", "", "i") AS ?trimmed)
+  BIND(REPLACE(?trimmed, "/index$", "", "i") AS ?withoutIndex)
+  BIND(REPLACE(REPLACE(REPLACE(?withoutIndex, "\\[\\[\\.\\.\\.([^/\\]]+)\\]\\]", "*$1"), "\\[\\.\\.\\.([^/\\]]+)\\]", "*$1"), "\\[([^/\\]]+)\\]", ":$1") AS ?withDynamics)
+  BIND(REPLACE(?withDynamics, "/{2,}", "/") AS ?normalized)
+  BIND(IF(?normalized = "", "/", CONCAT("/", REPLACE(?normalized, "^/", ""))) AS ?pattern)
+}
+;
+
+# N011: routePattern for pages router API routes
+CONSTRUCT {
+  ?u next:routePattern ?pattern .
+}
+WHERE {
+  ?u a laco:Unit ; laco:declaredIn ?f .
+  ?f dct:path ?p .
+  FILTER(REGEX(?p, "/pages/api/.+\\.(tsx|jsx|ts|js)$", "i"))
+  BIND(REPLACE(?p, "^.*?/pages", "", "i") AS ?subpath)
+  BIND(REPLACE(?subpath, "\\.(tsx|jsx|ts|js)$", "", "i") AS ?withoutExt)
+  BIND(REPLACE(?withoutExt, "/index$", "", "i") AS ?trimmed)
+  BIND(REPLACE(REPLACE(REPLACE(?trimmed, "\\[\\[\\.\\.\\.([^/\\]]+)\\]\\]", "*$1"), "\\[\\.\\.\\.([^/\\]]+)\\]", "*$1"), "\\[([^/\\]]+)\\]", ":$1") AS ?withDynamics)
+  BIND(REPLACE(?withDynamics, "/{2,}", "/") AS ?normalized)
+  BIND(IF(?normalized = "", "/", CONCAT("/", REPLACE(?normalized, "^/", ""))) AS ?pattern)
 }
 ;
 

@@ -95,6 +95,7 @@ laco:sha256    a owl:DatatypeProperty ; rdfs:domain laco:Artifact ; rdfs:range x
 laco:visibility        a owl:DatatypeProperty ; rdfs:domain laco:Unit ; rdfs:range xsd:string .
 laco:isMutable         a owl:DatatypeProperty ; rdfs:domain laco:Unit ; rdfs:range xsd:boolean .
 laco:isConst           a owl:DatatypeProperty ; rdfs:domain laco:Unit ; rdfs:range xsd:boolean .
+laco:isExternal        a owl:DatatypeProperty ; rdfs:domain laco:Unit ; rdfs:range xsd:boolean .
 laco:isExportedDefault a owl:DatatypeProperty ; rdfs:domain laco:Unit ; rdfs:range xsd:boolean .
 
 # Occurrence reification

@@ -5,8 +5,11 @@
 # Every Unit must have one declaredIn and one span
 laco:UnitShape a sh:NodeShape ;
   sh:targetClass laco:Unit ;
-  sh:property [ sh:path laco:declaredIn ; sh:minCount 1 ; sh:maxCount 1 ] ;
-  sh:property [ sh:path laco:span ;        sh:minCount 1 ; sh:maxCount 1 ] ;
+  sh:or (
+    [ sh:property [ sh:path laco:isExternal ; sh:hasValue true ] ]
+    [ sh:property [ sh:path laco:declaredIn ; sh:minCount 1 ; sh:maxCount 1 ] ;
+      sh:property [ sh:path laco:span ;        sh:minCount 1 ; sh:maxCount 1 ] ]
+  ) ;
   sh:property [ sh:path laco:qualifiedName ; sh:minCount 1 ] .
 
 # Span shape

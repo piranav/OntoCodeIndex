@@ -196,6 +196,7 @@ def apply_mapping(payload: dict[str, Any], context: MappingContext) -> Graph:
         if created_dangling and isinstance(qname_value, str) and qname_value not in context.symbol_index.dangling_emitted:
             graph.add((object_uri, RDF.type, LACO.Unit))
             graph.add((object_uri, LACO.qualifiedName, Literal(qname_value)))
+            graph.add((object_uri, LACO.isExternal, Literal(True)))
             context.symbol_index.dangling_emitted.add(qname_value)
         relation = str(occurrence.get("relation") or "calls")
         predicate = RELATION_TO_PREDICATE.get(relation)
